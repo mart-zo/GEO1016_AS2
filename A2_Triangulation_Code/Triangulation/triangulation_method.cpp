@@ -125,6 +125,25 @@ bool Triangulation::triangulation(
     /// matrix-vector product
     Vector3D v = M * Vector4D(1, 2, 3, 4); // M is 3 by 4
 
+
+    //Here I just added svd from last assignment :)))
+    // Compute the SVD decomposition of A
+    //svd_decompose(A, U, S, V);
+
+    // Now let's check if the SVD result is correct
+
+    // Check 1: U is orthogonal, so U * U^T must be identity
+    //std::cout << "U*U^T: \n" << U * transpose(U) << std::endl;
+
+    // Check 2: V is orthogonal, so V * V^T must be identity
+    //std::cout << "V*V^T: \n" << V * transpose(V) << std::endl;
+
+    // Check 3: S must be a diagonal matrix
+    //std::cout << "S: \n" << S << std::endl;
+
+    // Check 4: according to the definition, A = U * S * V^T
+    //std::cout << "M - U * S * V^T: \n" << A - U * S * transpose(V) << std::endl;
+
     ///For more functions of Matrix and Vector, please refer to 'matrix.h' and 'vector.h'
 
     // TODO: delete all above example code in your final submission
@@ -132,15 +151,15 @@ bool Triangulation::triangulation(
     //--------------------------------------------------------------------------------------------------------------
     // implementation starts ...
 
-    // TODO: check if the input is valid (always good because you never known how others will call your function).
+    // TODO: check if the input is valid (always good because you never known how others will call your function). - MARTA
 
     // TODO: Estimate relative pose of two views. This can be subdivided into
-    //      - estimate the fundamental matrix F;
-    //      - compute the essential matrix E;
-    //      - recover rotation R and t.
+    //      - estimate the fundamental matrix F; - MARTA
+    //      - compute the essential matrix E; - MARTA/FARIED
+    //      - recover rotation R and t. - FARIED
 
     // TODO: Reconstruct 3D points. The main task is
-    //      - triangulate a pair of image points (i.e., compute the 3D coordinates for each corresponding point pair)
+    //      - triangulate a pair of image points (i.e., compute the 3D coordinates for each corresponding point pair) -HASSAN
 
     // TODO: Don't forget to
     //          - write your recovered 3D points into 'points_3d' (so the viewer can visualize the 3D points for you);

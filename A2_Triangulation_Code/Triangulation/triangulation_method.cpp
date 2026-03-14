@@ -151,11 +151,130 @@ bool Triangulation::triangulation(
     //--------------------------------------------------------------------------------------------------------------
     // implementation starts ...
 
-    // TODO: check if the input is valid (always good because you never know how others will call your function). - MARTA
+    //checking if the input is valid (always good because you never know how others will call your function). - MARTA
+    //number of correspondences >= 8, no. of both images' points must match
+    if (points_0.size() < 8 || points_0.size() != points_1.size()) {
+        return false;
+    }
 
-    // TODO: Estimate relative pose of two views. This can be subdivided into
-    //      - estimate the fundamental matrix F; - MARTA
-    Matrix33 F = Matrix::identity(3, 3, 1.0); // temporary value for now
+    //STEP 1
+     //normalization
+    //initializing Translation matricies
+    Matrix T_1(3, 3, 0.0);
+    Matrix T_2(3, 3, 0.0);
+
+    // Extract u, v and compute centroid for image 1
+    double u1_bar = 0.0, v1_bar = 0.0;
+    int N = points_0.size();
+
+    for (int i = 0; i < N; i++) {
+        u1_bar += points_0[i][0];  // u coordinate
+        v1_bar += points_0[i][1];  // v coordinate
+    }
+    u1_bar /= N;
+    v1_bar /= N;
+
+    // Mean distance for image 1
+    double dist = 0.0;
+    for (int i = 0; i < N; i++) {
+        double du = points_0[i].x() - u1_bar;
+        double dv = points_0[i].y() - v1_bar;
+        dist += std::sqrt(du*du + dv*dv);
+    }
+    dist /= N;
+
+    double sc1 = std::sqrt(2.0) / dist;
+    //filling T1
+    T_1(0,0) = sc1;    T_1(0,1) = 0;    T_1(0,2) = -sc1 * u1_bar;
+    T_1(1,0) = 0;    T_1(1,1) = sc1;    T_1(1,2) = -sc1 * v1_bar;
+    T_1(2,0) = 0;    T_1(2,1) = 0;    T_1(2,2) = 1.0;
+
+    // Extract u, v and compute centroid for image 2
+    double u2_bar = 0.0, v2_bar = 0.0;
+    int N2 = points_1.size();
+
+    for (int i = 0; i < N2; i++) {
+        u2_bar += points_1[i][0];  // u coordinate
+        v2_bar += points_1[i][1];  // v coordinate
+    }
+    u2_bar /= N2;
+    v2_bar /= N2;
+
+    // Mean distance for image 2
+    double dist2 = 0.0;
+    for (int i = 0; i < N2; i++) {
+        double du2 = points_1[i].x() - u2_bar;
+        double dv2 = points_1[i].y() - v2_bar;
+        dist2 += std::sqrt(du2*du2 + dv2*dv2);
+    }
+    dist2 /= N2;
+
+    double sc2 = std::sqrt(2.0) / dist2;
+    //filling T2
+    T_2(0,0) = sc2;    T_2(0,1) = 0;    T_2(0,2) = -sc2 * u2_bar;
+    T_2(1,0) = 0;    T_2(1,1) = sc2;    T_2(1,2) = -sc2 * v2_bar;
+    T_2(2,0) = 0;    T_2(2,1) = 0;    T_2(2,2) = 1.0;
+
+    //normalizing the points with T matricies
+    // Normalized points for image 1
+    std::vector<Vector3D> q_0;
+    for (int i = 0; i < N; i++) {
+        Vector3D q = T_1 * points_0[i].homogeneous();  // we add 1 to the points so now we have (u,v, 1) then multiply by T
+        q_0.push_back(q);
+    }
+
+    // Normalized points for image 2
+    std::vector<Vector3D> q_1;
+    for (int i = 0; i < N; i++) {
+        Vector3D q = T_2 * points_1[i].homogeneous();
+        q_1.push_back(q);
+    }
+    //Linear solution (based on SVD)
+    //initializing W matrix with Os
+    Matrix W1(N, 9, 0.0);
+    //now we add values from q_0 and q_1 to matrix W
+    for (int i = 0; i < N; i++) {
+        double u  = q_0[i][0];
+        double v  = q_0[i][1];
+        double u_ = q_1[i][0];
+        double v_ = q_1[i][1];
+
+        W1.set_row(i, {u*u_, v*u_, u_, u*v_, v*v_, v_, u, v, 1.0});
+    }
+
+    // SVD for W to get f (Wf=0)
+    Matrix U1(N, N, 0.0);
+    Matrix S1(N, 9, 0.0);
+    Matrix V1(9, 9, 0.0);
+
+    // W = U * S * V^T
+    svd_decompose(W1, U1, S1, V1);
+
+    // Last column of V gives f
+    Vector f = V1.get_column(8);
+
+    //Fundamental matrix from f (before constraint enforcement)
+    Matrix33 F_initial(f[0], f[1], f[2],
+               f[3], f[4], f[5],
+               f[6], f[7], f[8]);
+
+    //Constraint enforcement
+    // SVD of F_initial
+    Matrix U_initial(3, 3, 0.0);
+    Matrix S_initial(3, 3, 0.0);
+    Matrix V_initial(3, 3, 0.0);
+
+    svd_decompose(F_initial, U_initial, S_initial, V_initial);
+    // Setting d3 to 0
+    S_initial(2, 2) = 0.0;
+
+    // Recomposing with constraint applied
+    Matrix33 F_q = U_initial * S_initial * transpose(V_initial);
+
+    //denormalization F = T_1FT_2
+    Matrix33 F = transpose(T_2) * F_q * T_1;
+
+    //STEP 2
     
     // Setting up intrinsic camera matrix K.
     Matrix33 K(fx, s, cx,

@@ -103,21 +103,21 @@ bool Triangulation::triangulation(
     M.set_column(1, Vector3D(5.5, 5.5, 5.5));
 
     /// define a 15 by 9 matrix (and all elements initialized to 0.0)
-    Matrix W(15, 9, 0.0);
+    Matrix Y(15, 9, 0.0);
     /// set the first row by a 9-dimensional vector
-    W.set_row(0, {0, 1, 2, 3, 4, 5, 6, 7, 8}); // {....} is equivalent to a std::vector<double>
+    Y.set_row(0, {0, 1, 2, 3, 4, 5, 6, 7, 8}); // {....} is equivalent to a std::vector<double>
 
     /// get the number of rows.
-    int num_rows = W.rows();
+    int num_rows = Y.rows();
 
     /// get the number of columns.
-    int num_cols = W.cols();
+    int num_cols = Y.cols();
 
     /// get the the element at row 1 and column 2
-    double value = W(1, 2);
+    double value = Y(1, 2);
 
     /// get the last column of a matrix
-    Vector last_column = W.get_column(W.cols() - 1);
+    Vector last_column = Y.get_column(Y.cols() - 1);
 
     /// define a 3 by 3 identity matrix
     Matrix33 I = Matrix::identity(3, 3, 1.0);
@@ -151,12 +151,117 @@ bool Triangulation::triangulation(
     //--------------------------------------------------------------------------------------------------------------
     // implementation starts ...
 
-    // TODO: check if the input is valid (always good because you never known how others will call your function). - MARTA
+    // TODO: check if the input is valid (always good because you never know how others will call your function). - MARTA
 
     // TODO: Estimate relative pose of two views. This can be subdivided into
     //      - estimate the fundamental matrix F; - MARTA
-    //      - compute the essential matrix E; - MARTA/FARIED
-    //      - recover rotation R and t. - FARIED
+    Matrix33 F = Matrix::identity(3, 3, 1.0); // temporary value for now
+    
+    // Setting up intrinsic camera matrix K.
+    Matrix33 K(fx, s, cx,
+               0, fy, cy,
+               0, 0, 1);
+    
+    // Computing the essential matrix E.
+    Matrix33 E = transpose(K) * F * K;
+    
+    // Matrices W and Z, for later use in decomposition.
+    Matrix33 W(0, -1, 0,
+               1, 0, 0,
+               0, 0, 1);
+    
+    Matrix33 Z(0, 1, 0,
+               -1, 0, 0,
+               0, 0, 0);
+
+    // Define U, D and V, used for SVD decomposition.
+    Matrix33 U = Matrix::identity(3, 3, 1.0);
+    Matrix33 D = Matrix::identity(3, 3, 1.0);
+    Matrix33 V = Matrix::identity(3, 3, 1.0);
+
+    // Compute the SVD decomposition of E.
+    svd_decompose(E, U, D, V);
+
+    // Finding the 4 candidate relative poses.
+    // Recover possible t values (by getting the last column of matrix U).
+    Vector t_pos = U.get_column(U.cols() - 1);
+    Vector t_neg = -t_pos;
+
+    // Recover possible R values.
+    Matrix33 R_1 = determinant(U * W * transpose(V)) * U * W * transpose(V);
+    Matrix33 R_2 = determinant(U * transpose(W) * transpose(V)) * U * transpose(W) * transpose(V);
+
+    // Triangulate image points to find correct relative pose.
+    // The 4 candidate pairs
+    Matrix33 K_inv = inverse(K);
+
+    // Create vector of possible R & t pairs.
+    std::vector<std::pair<Matrix33, Vector3D>> candidates = {
+        {R_1, t_pos}, {R_1, t_neg},
+        {R_2, t_pos}, {R_2, t_neg}
+    };
+
+    // Keep track of best pair (start with lowest possible count).
+    int best_count = -1;
+    Matrix33 best_R;
+    Vector3D best_t;
+
+    // Loop through all pairs.
+    for (auto& [R_cand, t_cand] : candidates) {
+        int count = 0;
+
+        // Camera 2 center in world frame: O2 = -R^T * t
+        Vector3D O1(0, 0, 0);
+        Vector3D O2 = -(transpose(R_cand) * t_cand);
+
+        // Loop through image points to test the pairs.
+        for (int i = 0; i < points_0.size(); i++) {
+            // Ray directions (unproject pixels using K_inv to go from image points to real world coordinates).
+            Vector3D d1 = K_inv * points_0[i].homogeneous();
+            Vector3D d2 = transpose(R_cand) * (K_inv * points_1[i].homogeneous());
+
+            // Find intersection of two lines:
+            // O1 + s1*d1 = O2 + s2*d2 (l1 = l2)
+            // This gives: s1*d1 - s2*d2 = O2 - O1
+            // Solve [d1 | -d2] * [s1, s2]^T = O2 - O1  (3x2 system, least squares)
+            Vector3D w = O2 - O1;
+
+            // Least square solution to s1 and s2.
+            double a = dot(d1, d1);
+            double b = dot(d1, d2);
+            double c = dot(d2, d2);
+            double d = dot(d1, w);
+            double e = dot(d2, w);
+
+            double denom = a*c - b*b;
+            if (std::abs(denom) < 1e-10) continue;  // parallel rays, skip
+
+            double s1      = (b*e - c*d) / denom;
+            double s2 = (a*e - b*d) / denom;
+
+            // 3D point P = midpoint of closest approach
+            Vector3D P = ((O1 + s1 * d1) + (O2 + s2 * d2)) / 2.0;
+
+            // In front of camera 1: P.z > 0
+            // In front of camera 2: (R*P + t).z > 0
+            Vector3D P_cam2 = R_cand * P + t_cand;
+
+            if (P.z() > 0 && P_cam2.z() > 0) {
+                count++;
+            }
+        }
+
+        if (count > best_count) {
+            best_count = count;
+            best_R = R_cand;
+            best_t = t_cand;
+        }
+    }
+
+    // best_R and best_t are now the correct relative pose
+    R = best_R;
+    t = best_t;
+
 
     // TODO: Reconstruct 3D points. The main task is
     //      - triangulate a pair of image points (i.e., compute the 3D coordinates for each corresponding point pair) -HASSAN

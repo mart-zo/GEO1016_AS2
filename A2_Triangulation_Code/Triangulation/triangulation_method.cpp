@@ -157,13 +157,13 @@ bool Triangulation::triangulation(
         return false;
     }
 
-    //STEP 1
-     //normalization
-    //initializing Translation matricies
+    // STEP 1.
+    // Normalization.
+    // Initializing Translation matricies.
     Matrix T_1(3, 3, 0.0);
     Matrix T_2(3, 3, 0.0);
 
-    // Extract u, v and compute centroid for image 1
+    // Extract u, v and compute centroid for image 1.
     double u1_bar = 0.0, v1_bar = 0.0;
     int N = points_0.size();
 
@@ -174,7 +174,7 @@ bool Triangulation::triangulation(
     u1_bar /= N;
     v1_bar /= N;
 
-    // Mean distance for image 1
+    // Mean distance for image 1.
     double dist = 0.0;
     for (int i = 0; i < N; i++) {
         double du = points_0[i].x() - u1_bar;
@@ -184,12 +184,12 @@ bool Triangulation::triangulation(
     dist /= N;
 
     double sc1 = std::sqrt(2.0) / dist;
-    //filling T1
+    // Filling T1.
     T_1(0,0) = sc1;    T_1(0,1) = 0;    T_1(0,2) = -sc1 * u1_bar;
     T_1(1,0) = 0;    T_1(1,1) = sc1;    T_1(1,2) = -sc1 * v1_bar;
     T_1(2,0) = 0;    T_1(2,1) = 0;    T_1(2,2) = 1.0;
 
-    // Extract u, v and compute centroid for image 2
+    // Extract u, v and compute centroid for image 2.
     double u2_bar = 0.0, v2_bar = 0.0;
     int N2 = points_1.size();
 
@@ -200,7 +200,7 @@ bool Triangulation::triangulation(
     u2_bar /= N2;
     v2_bar /= N2;
 
-    // Mean distance for image 2
+    // Mean distance for image 2.
     double dist2 = 0.0;
     for (int i = 0; i < N2; i++) {
         double du2 = points_1[i].x() - u2_bar;
@@ -210,29 +210,29 @@ bool Triangulation::triangulation(
     dist2 /= N2;
 
     double sc2 = std::sqrt(2.0) / dist2;
-    //filling T2
+    // Filling T2.
     T_2(0,0) = sc2;    T_2(0,1) = 0;    T_2(0,2) = -sc2 * u2_bar;
     T_2(1,0) = 0;    T_2(1,1) = sc2;    T_2(1,2) = -sc2 * v2_bar;
     T_2(2,0) = 0;    T_2(2,1) = 0;    T_2(2,2) = 1.0;
 
-    //normalizing the points with T matricies
-    // Normalized points for image 1
+    // Normalizing the points with T matricies.
+    // Normalized points for image 1.
     std::vector<Vector3D> q_0;
     for (int i = 0; i < N; i++) {
         Vector3D q = T_1 * points_0[i].homogeneous();  // we add 1 to the points so now we have (u,v, 1) then multiply by T
         q_0.push_back(q);
     }
 
-    // Normalized points for image 2
+    // Normalized points for image 2.
     std::vector<Vector3D> q_1;
     for (int i = 0; i < N; i++) {
         Vector3D q = T_2 * points_1[i].homogeneous();
         q_1.push_back(q);
     }
-    //Linear solution (based on SVD)
-    //initializing W matrix with Os
+    // Linear solution (based on SVD).
+    // Initializing W matrix with Os.
     Matrix W1(N, 9, 0.0);
-    //now we add values from q_0 and q_1 to matrix W
+    // Now we add values from q_0 and q_1 to matrix W.
     for (int i = 0; i < N; i++) {
         double u  = q_0[i][0];
         double v  = q_0[i][1];
@@ -242,40 +242,39 @@ bool Triangulation::triangulation(
         W1.set_row(i, {u*u_, v*u_, u_, u*v_, v*v_, v_, u, v, 1.0});
     }
 
-    // SVD for W to get f (Wf=0)
+    // SVD for W to get f (Wf=0).
     Matrix U1(N, N, 0.0);
     Matrix S1(N, 9, 0.0);
     Matrix V1(9, 9, 0.0);
 
-    // W = U * S * V^T
+    // W = U * S * V^T.
     svd_decompose(W1, U1, S1, V1);
 
-    // Last column of V gives f
+    // Last column of V gives f.
     Vector f = V1.get_column(8);
 
-    //Fundamental matrix from f (before constraint enforcement)
+    // Fundamental matrix from f (before constraint enforcement).
     Matrix33 F_initial(f[0], f[1], f[2],
                f[3], f[4], f[5],
                f[6], f[7], f[8]);
 
-    //Constraint enforcement
-    // SVD of F_initial
+    // Constraint enforcement.
+    // SVD of F_initial.
     Matrix U_initial(3, 3, 0.0);
     Matrix S_initial(3, 3, 0.0);
     Matrix V_initial(3, 3, 0.0);
 
     svd_decompose(F_initial, U_initial, S_initial, V_initial);
-    // Setting d3 to 0
+    // Setting d3 to 0.
     S_initial(2, 2) = 0.0;
 
-    // Recomposing with constraint applied
+    // Recomposing with constraint applied.
     Matrix33 F_q = U_initial * S_initial * transpose(V_initial);
 
-    //denormalization F = T_1FT_2
+    // Denormalization F = T_1FT_2.
     Matrix33 F = transpose(T_2) * F_q * T_1;
 
-    //STEP 2
-    
+    // STEP 2.
     // Setting up intrinsic camera matrix K.
     Matrix33 K(fx, s, cx,
                0, fy, cy,
@@ -311,7 +310,7 @@ bool Triangulation::triangulation(
     Matrix33 R_2 = determinant(U * transpose(W) * transpose(V)) * U * transpose(W) * transpose(V);
 
     // Triangulate image points to find correct relative pose.
-    // The 4 candidate pairs
+    // The 4 candidate pairs.
     Matrix33 K_inv = inverse(K);
 
     // Create vector of possible R & t pairs.
@@ -329,7 +328,7 @@ bool Triangulation::triangulation(
     for (auto& [R_cand, t_cand] : candidates) {
         int count = 0;
 
-        // Camera 2 center in world frame: O2 = -R^T * t
+        // Camera 2 center in world frame: O2 = -R^T * t.
         Vector3D O1(0, 0, 0);
         Vector3D O2 = -(transpose(R_cand) * t_cand);
 
@@ -340,9 +339,9 @@ bool Triangulation::triangulation(
             Vector3D d2 = transpose(R_cand) * (K_inv * points_1[i].homogeneous());
 
             // Find intersection of two lines:
-            // O1 + s1*d1 = O2 + s2*d2 (l1 = l2)
-            // This gives: s1*d1 - s2*d2 = O2 - O1
-            // Solve [d1 | -d2] * [s1, s2]^T = O2 - O1  (3x2 system, least squares)
+            // O1 + s1*d1 = O2 + s2*d2 (l1 = l2).
+            // This gives: s1*d1 - s2*d2 = O2 - O1.
+            // Solve [d1 | -d2] * [s1, s2]^T = O2 - O1  (3x2 system, least squares).
             Vector3D w = O2 - O1;
 
             // Least square solution to s1 and s2.
@@ -358,11 +357,11 @@ bool Triangulation::triangulation(
             double s1      = (b*e - c*d) / denom;
             double s2 = (a*e - b*d) / denom;
 
-            // 3D point P = midpoint of closest approach
+            // 3D point P = midpoint of closest approach.
             Vector3D P = ((O1 + s1 * d1) + (O2 + s2 * d2)) / 2.0;
 
-            // In front of camera 1: P.z > 0
-            // In front of camera 2: (R*P + t).z > 0
+            // In front of camera 1: P.z > 0.
+            // In front of camera 2: (R*P + t).z > 0.
             Vector3D P_cam2 = R_cand * P + t_cand;
 
             if (P.z() > 0 && P_cam2.z() > 0) {
@@ -377,7 +376,7 @@ bool Triangulation::triangulation(
         }
     }
 
-    // best_R and best_t are now the correct relative pose
+    // best_R and best_t are now the correct relative pose.
     R = best_R;
     t = best_t;
 

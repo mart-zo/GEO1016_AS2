@@ -434,7 +434,7 @@ bool Triangulation::triangulation(
 
     // we now loop over all corresponding image points and triangulate them one by one
     // each pair of points should give us one 3D point
-    for (int i = 0; i < points_0.size(); i++) {
+    for (int i = 0; i < (int)points_0.size(); i++) {
         double x0 = points_0[i].x();
         double y0 = points_0[i].y();
         double x1 = points_1[i].x();
@@ -470,13 +470,14 @@ bool Triangulation::triangulation(
             continue;
         }
 
-        // convert to normal 3D coordinates by dividing by X[3]
+        // convert from homogeneous to normal 3D coordinates
         double Xc = X[0] / X[3];
         double Yc = X[1] / X[3];
         double Zc = X[2] / X[3];
 
         // store the 3D point so we can visualize it later
-        Vector3D point_3d(Xc, Yc, Zc);
+        Vector3D point_3d;
+        point_3d = Vector3D(Xc, Yc, Zc);
         points_3d.push_back(point_3d);
     }
 

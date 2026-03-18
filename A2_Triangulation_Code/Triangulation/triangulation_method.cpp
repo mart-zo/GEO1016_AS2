@@ -325,7 +325,9 @@ bool Triangulation::triangulation(
     Vector3D best_t;
 
     // Loop through all pairs.
-    for (auto& [R_cand, t_cand] : candidates) {
+    for (int k = 0; k < candidates.size(); k++) {
+        Matrix R_cand = candidates[k].first;
+        Vector3D t_cand = candidates[k].second;
         int count = 0;
 
         // Camera 2 center in world frame: O2 = -R^T * t.
@@ -336,7 +338,11 @@ bool Triangulation::triangulation(
         for (int i = 0; i < points_0.size(); i++) {
             // Ray directions (unproject pixels using K_inv to go from image points to real world coordinates).
             Vector3D d1 = K_inv * points_0[i].homogeneous();
-            Vector3D d2 = transpose(R_cand) * (K_inv * points_1[i].homogeneous());
+            
+            // Convert the image point to a direction vector and rotate it to match the world coordinate system
+            Vector temp_d2 = K_inv * points_1[i].homogeneous();
+            Vector rotated_d2 = transpose(R_cand) * temp_d2;
+            Vector3D d2(rotated_d2[0], rotated_d2[1], rotated_d2[2]);
 
             // Find intersection of two lines:
             // O1 + s1*d1 = O2 + s2*d2 (l1 = l2).
@@ -394,5 +400,86 @@ bool Triangulation::triangulation(
     //          - function not implemented yet;
     //          - input not valid (e.g., not enough points, point numbers don't match);
     //          - encountered failure in any step.
-    return points_3d.size() > 0;
+
+    // STEP 3: triangulation
+    // clear any previous 3D points so we start fresh for this reconstruction
+    points_3d.clear();
+
+    // build projection matrix for camera 1 (we assume this camera is at the origin)
+    Matrix34 P0;
+    P0(0,0) = fx;   P0(0,1) = s;    P0(0,2) = cx;   P0(0,3) = 0.0;
+    P0(1,0) = 0.0;  P0(1,1) = fy;   P0(1,2) = cy;   P0(1,3) = 0.0;
+    P0(2,0) = 0.0;  P0(2,1) = 0.0;  P0(2,2) = 1.0;  P0(2,3) = 0.0;
+
+    // build projection matrix for camera 2 using the R and t we found before
+    // this represents how the second camera is positioned relative to the first one
+    Matrix34 Rt;
+    Rt(0,0) = R(0,0);
+    Rt(0,1) = R(0,1);
+    Rt(0,2) = R(0,2);
+    Rt(0,3) = t.x();
+
+    Rt(1,0) = R(1,0);
+    Rt(1,1) = R(1,1);
+    Rt(1,2) = R(1,2);
+    Rt(1,3) = t.y();
+
+    Rt(2,0) = R(2,0);
+    Rt(2,1) = R(2,1);
+    Rt(2,2) = R(2,2);
+    Rt(2,3) = t.z();
+
+    // multiply with K to get the full projection matrix for camera 2
+    Matrix34 P1 = K * Rt;
+
+    // we now loop over all corresponding image points and triangulate them one by one
+    // each pair of points should give us one 3D point
+    for (int i = 0; i < points_0.size(); i++) {
+        double x0 = points_0[i].x();
+        double y0 = points_0[i].y();
+        double x1 = points_1[i].x();
+        double y1 = points_1[i].y();
+
+        // here we build matrix A such that A * X = 0, where X is the 3D point
+        // this comes from combining the projection equations of both cameras
+        Matrix A(4, 4, 0.0);
+
+        // compute each row separately so it is easier to see what is going on
+        Vector row1 = x0 * P0.get_row(2) - P0.get_row(0);
+        Vector row2 = y0 * P0.get_row(2) - P0.get_row(1);
+        Vector row3 = x1 * P1.get_row(2) - P1.get_row(0);
+        Vector row4 = y1 * P1.get_row(2) - P1.get_row(1);
+
+        A.set_row(0, row1);
+        A.set_row(1, row2);
+        A.set_row(2, row3);
+        A.set_row(3, row4);
+
+        // used SVD to solve for X
+        // the result is in the last column of V
+        Matrix Ux(4, 4, 0.0);
+        Matrix Sx(4, 4, 0.0);
+        Matrix Vx(4, 4, 0.0);
+        svd_decompose(A, Ux, Sx, Vx);
+
+        // take the last column of V as the solution in homogeneous coordinates
+        Vector X = Vx.get_column(3);
+
+        // check if the homogeneous coordinate is valid before dividing
+        if (std::abs(X[3]) < 1e-10) {
+            continue;
+        }
+
+        // convert to normal 3D coordinates by dividing by X[3]
+        double Xc = X[0] / X[3];
+        double Yc = X[1] / X[3];
+        double Zc = X[2] / X[3];
+
+        // store the 3D point so we can visualize it later
+        Vector3D point_3d(Xc, Yc, Zc);
+        points_3d.push_back(point_3d);
+    }
+
+    // we return true if we managed to reconstruct at least one point
+    return !points_3d.empty();
 }

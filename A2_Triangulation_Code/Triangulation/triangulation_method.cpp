@@ -69,85 +69,6 @@ bool Triangulation::triangulation(
                  "\t    - remove ALL unrelated test code, debugging code, and comments.\n"
                  "\t    - ensure that your code compiles and can reproduce your results WITHOUT ANY modification.\n\n" << std::flush;
 
-    /// Below are a few examples showing some useful data structures and APIs.
-
-    /// define a 2D vector/point
-    // Vector2D b(1.1, 2.2);
-
-    /// define a 3D vector/point
-    // Vector3D a(1.1, 2.2, 3.3);
-
-    /// get the Cartesian coordinates of a (a is treated as Homogeneous coordinates)
-    // Vector2D p = a.cartesian();
-
-    /// get the Homogeneous coordinates of p
-    // Vector3D q = p.homogeneous();
-
-    /// define a 3 by 3 matrix (and all elements initialized to 0.0)
-    // Matrix33 A;
-
-    /// define and initialize a 3 by 3 matrix
-    // Matrix33 T(1.1, 2.2, 3.3,
-               // 0, 2.2, 3.3,
-               // 0, 0, 1);
-
-    /// define and initialize a 3 by 4 matrix
-    // Matrix34 M(1.1, 2.2, 3.3, 0,
-               // 0, 2.2, 3.3, 1,
-               // 0, 0, 1, 1);
-
-    /// set first row by a vector
-    // M.set_row(0, Vector4D(1.1, 2.2, 3.3, 4.4));
-
-    // set second column by a vector
-    // M.set_column(1, Vector3D(5.5, 5.5, 5.5));
-
-    /// define a 15 by 9 matrix (and all elements initialized to 0.0)
-    // Matrix Y(15, 9, 0.0);
-    /// set the first row by a 9-dimensional vector
-    // Y.set_row(0, {0, 1, 2, 3, 4, 5, 6, 7, 8}); // {....} is equivalent to a std::vector<double>
-
-    /// get the number of rows.
-    // int num_rows = Y.rows();
-
-    // get the number of columns.
-    // int num_cols = Y.cols();
-
-    /// get the the element at row 1 and column 2
-    // double value = Y(1, 2);
-
-    /// get the last column of a matrix
-    // Vector last_column = Y.get_column(Y.cols() - 1);
-
-    /// define a 3 by 3 identity matrix
-    // Matrix33 I = Matrix::identity(3, 3, 1.0);
-
-    /// matrix-vector product
-    // Vector3D v = M * Vector4D(1, 2, 3, 4); // M is 3 by 4
-
-
-    //Here I just added svd from last assignment :)))
-    // Compute the SVD decomposition of A
-    //svd_decompose(A, U, S, V);
-
-    // Now let's check if the SVD result is correct
-
-    // Check 1: U is orthogonal, so U * U^T must be identity
-    //std::cout << "U*U^T: \n" << U * transpose(U) << std::endl;
-
-    // Check 2: V is orthogonal, so V * V^T must be identity
-    //std::cout << "V*V^T: \n" << V * transpose(V) << std::endl;
-
-    // Check 3: S must be a diagonal matrix
-    //std::cout << "S: \n" << S << std::endl;
-
-    // Check 4: according to the definition, A = U * S * V^T
-    //std::cout << "M - U * S * V^T: \n" << A - U * S * transpose(V) << std::endl;
-
-    ///For more functions of Matrix and Vector, please refer to 'matrix.h' and 'vector.h'
-
-    // TODO: delete all above example code in your final submission
-
     //--------------------------------------------------------------------------------------------------------------
     // implementation starts ...
 
@@ -313,10 +234,6 @@ bool Triangulation::triangulation(
     D(1,1) = 1.0;
     D(2,2) = 0.0;
 
-    E = U * D * transpose(V);
-
-    svd_decompose(E, U, D, V);
-
     // Finding the 4 candidate relative poses.
     // Recover possible t values (by getting the last column of matrix U).
     Vector t_pos = U.get_column(U.cols() - 1);
@@ -327,9 +244,6 @@ bool Triangulation::triangulation(
     Matrix33 R_2 = determinant(U * transpose(W) * transpose(V)) * U * transpose(W) * transpose(V);
 
     // Triangulate image points to find correct relative pose.
-    // The 4 candidate pairs.
-    Matrix33 K_inv = inverse(K);
-
     // Create vector of possible R & t pairs.
     std::vector<std::pair<Matrix33, Vector3D>> candidates = {
         {R_1, t_pos}, {R_1, t_neg},
@@ -341,57 +255,66 @@ bool Triangulation::triangulation(
     Matrix33 best_R;
     Vector3D best_t;
 
-    // Loop through all pairs.
+    // Loop through all pairs to find the correct one (where most 3D points lie in front of
+    // both cameras (positive z in both camera coordinate systems).
     for (int k = 0; k < candidates.size(); k++) {
-        Matrix R_cand = candidates[k].first;
+        Matrix33 R_cand = candidates[k].first;
         Vector3D t_cand = candidates[k].second;
         int count = 0;
 
-        // Camera 2 center in world frame: O2 = -R^T * t.
-        Vector3D O1(0, 0, 0);
-        Vector3D O2 = -(transpose(R_cand) * t_cand);
+        // Build the [R|t] matrix for camera 2 using this candidate pose.
+        Matrix34 Rt_cand;
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) Rt_cand(r,c) = R_cand(r,c);
+        }
+        Rt_cand(0,3) = t_cand.x();
+        Rt_cand(1,3) = t_cand.y();
+        Rt_cand(2,3) = t_cand.z();
 
-        // Loop through image points to test the pairs.
-        for (int i = 0; i < points_0.size(); i++) {
-            // Ray directions (unproject pixels using K_inv to go from image points to real world coordinates).
-            Vector3D d1 = K_inv * points_0[i].homogeneous();
-            
-            // Convert the image point to a direction vector and rotate it to match the world coordinate system
-            Vector temp_d2 = K_inv * points_1[i].homogeneous();
-            Vector rotated_d2 = transpose(R_cand) * temp_d2;
-            Vector3D d2(rotated_d2[0], rotated_d2[1], rotated_d2[2]);
+        // Camera 1 projection matrix: K * [I | 0] (camera 1 is at the world origin).
+        Matrix34 P0_cand;
+        P0_cand(0,0)=fx; P0_cand(0,1)=s;  P0_cand(0,2)=cx; P0_cand(0,3)=0;
+        P0_cand(1,0)=0;  P0_cand(1,1)=fy; P0_cand(1,2)=cy; P0_cand(1,3)=0;
+        P0_cand(2,0)=0;  P0_cand(2,1)=0;  P0_cand(2,2)=1;  P0_cand(2,3)=0;
 
-            // Find intersection of two lines:
-            // O1 + s1*d1 = O2 + s2*d2 (l1 = l2).
-            // This gives: s1*d1 - s2*d2 = O2 - O1.
-            // Solve [d1 | -d2] * [s1, s2]^T = O2 - O1  (3x2 system, least squares).
-            Vector3D w = O2 - O1;
+        // Camera 2 projection matrix: K * [R | t].
+        Matrix34 P1_cand = K * Rt_cand;
 
-            // Least square solution to s1 and s2.
-            double a = dot(d1, d1);
-            double b = dot(d1, d2);
-            double c = dot(d2, d2);
-            double d = dot(d1, w);
-            double e = dot(d2, w);
+        // Triangulate each point pair using the linear (DLT) method
+        // and check if the resulting 3D point is in front of both cameras.
+        for (int i = 0; i < (int)points_0.size(); i++) {
+            double x0 = points_0[i].x(), y0 = points_0[i].y();
+            double x1 = points_1[i].x(), y1 = points_1[i].y();
 
-            double denom = a*c - b*b;
-            if (std::abs(denom) < 1e-10) continue;  // parallel rays, skip
+            // Build the 4x4 matrix A such that A * X = 0, where X is the 3D point
+            // in homogeneous coordinates. Each image point contributes 2 rows.
+            Matrix A(4, 4, 0.0);
+            A.set_row(0, x0 * P0_cand.get_row(2) - P0_cand.get_row(0));
+            A.set_row(1, y0 * P0_cand.get_row(2) - P0_cand.get_row(1));
+            A.set_row(2, x1 * P1_cand.get_row(2) - P1_cand.get_row(0));
+            A.set_row(3, y1 * P1_cand.get_row(2) - P1_cand.get_row(1));
 
-            double s1      = (b*e - c*d) / denom;
-            double s2 = (a*e - b*d) / denom;
+            // Solve A * X = 0 using SVD. The solution is the last column of V.
+            Matrix Ux(4,4,0.0), Sx(4,4,0.0), Vx(4,4,0.0);
+            svd_decompose(A, Ux, Sx, Vx);
+            Vector X = Vx.get_column(3);
 
-            // 3D point P = midpoint of closest approach.
-            Vector3D P = ((O1 + s1 * d1) + (O2 + s2 * d2)) / 2.0;
+            // Skip degenerate solutions where the homogeneous coordinate is near zero.
+            if (std::abs(X[3]) < 1e-10) continue;
+            if (X[3] < 0) X = -1.0 * X;
 
-            // In front of camera 1: P.z > 0.
-            // In front of camera 2: (R*P + t).z > 0.
-            Vector3D P_cam2 = R_cand * P + t_cand;
+            // The SVD solution is defined up to scale, so normalize the sign of
+            // the homogeneous coordinate before converting to Euclidean coordinates.
+            double Xc = X[0]/X[3], Yc = X[1]/X[3], Zc = X[2]/X[3];
 
-            if (P.z() > 0 && P_cam2.z() > 0) {
-                count++;
-            }
+            // Transform the point into camera 2's coordinate system to check depth there.
+            Vector3D P_cam2 = R_cand * Vector3D(Xc, Yc, Zc) + t_cand;
+
+            // Count the point if it lies in front of both cameras (positive z depth).
+            if (Zc > 0 && P_cam2.z() > 0) count++;
         }
 
+        // Keep track of the candidate pair that puts the most points in front of both cameras.
         if (count > best_count) {
             best_count = count;
             best_R = R_cand;
@@ -403,28 +326,12 @@ bool Triangulation::triangulation(
     Matrix33 R_used = best_R;
     Vector3D t_used = best_t;
 
-    // temporary debug: keep viewer pose simple
-    R = Matrix::identity(3, 3, 1.0);
-    t = Vector3D(0, 0, 0);
+    //
+    R = best_R;
+    t = best_t;
 
-
-    // TODO: Reconstruct 3D points. The main task is
-    //      - triangulate a pair of image points (i.e., compute the 3D coordinates for each corresponding point pair) -HASSAN
-
-    // TODO: Don't forget to
-    //          - write your recovered 3D points into 'points_3d' (so the viewer can visualize the 3D points for you);
-    //          - write the recovered relative pose into R and t (the view will be updated as seen from the 2nd camera,
-    //            which can help you check if R and t are correct).
-    //       You must return either 'true' or 'false' to indicate whether the triangulation was successful (so the
-    //       viewer will be notified to visualize the 3D points and update the view).
-    //       There are a few cases you should return 'false' instead, for example:
-    //          - function not implemented yet;
-    //          - input not valid (e.g., not enough points, point numbers don't match);
-    //          - encountered failure in any step.
-
-    // STEP 3: triangulation
-
-    // clear any previous 3D points so we start fresh for this reconstruction
+    // STEP 3: triangulation.
+    // clear any previous 3D points so we start fresh for this reconstruction.
     points_3d.clear();
 
     // build projection matrix for camera 1 (we assume this camera is at the origin)
@@ -494,22 +401,17 @@ bool Triangulation::triangulation(
         double Zc = X[2] / X[3];
 
         // make sure the point lies in front of the camera otherwise flip the sign to move it to the correct side
-        if (Zc < 0) {
-            Xc = -Xc;
-            Yc = -Yc;
-            Zc = -Zc;
+        if (X[3] < 0) {
+            Xc = -Xc; Yc = -Yc; Zc = -Zc;
         }
+        // Then skip genuinely invalid points:
+        if (Zc < 0) continue;
 
         // store the 3D point so we can visualize it later
         Vector3D point_3d;
         point_3d = Vector3D(Xc, Yc, Zc);
         points_3d.push_back(point_3d);
     }
-
-
-
-
-
 
     // return true if at least one 3D point was reconstructed
     return !points_3d.empty();

@@ -300,6 +300,23 @@ bool Triangulation::triangulation(
     // Compute the SVD decomposition of E.
     svd_decompose(E, U, D, V);
 
+    // making sure U has a positive determinant
+    if (determinant(U) < 0) {
+        U = -U;
+    }
+    // making sure V has a positive determinant
+    if (determinant(V) < 0) {
+        V = -V;
+    }
+
+    D(0,0) = 1.0;
+    D(1,1) = 1.0;
+    D(2,2) = 0.0;
+
+    E = U * D * transpose(V);
+
+    svd_decompose(E, U, D, V);
+
     // Finding the 4 candidate relative poses.
     // Recover possible t values (by getting the last column of matrix U).
     Vector t_pos = U.get_column(U.cols() - 1);
@@ -382,9 +399,13 @@ bool Triangulation::triangulation(
         }
     }
 
-    // best_R and best_t are now the correct relative pose.
-    R = best_R;
-    t = best_t;
+    // keep a copy of the recovered pose for triangulation
+    Matrix33 R_used = best_R;
+    Vector3D t_used = best_t;
+
+    // temporary debug: keep viewer pose simple
+    R = Matrix::identity(3, 3, 1.0);
+    t = Vector3D(0, 0, 0);
 
 
     // TODO: Reconstruct 3D points. The main task is
@@ -402,6 +423,7 @@ bool Triangulation::triangulation(
     //          - encountered failure in any step.
 
     // STEP 3: triangulation
+
     // clear any previous 3D points so we start fresh for this reconstruction
     points_3d.clear();
 
@@ -411,37 +433,34 @@ bool Triangulation::triangulation(
     P0(1,0) = 0.0;  P0(1,1) = fy;   P0(1,2) = cy;   P0(1,3) = 0.0;
     P0(2,0) = 0.0;  P0(2,1) = 0.0;  P0(2,2) = 1.0;  P0(2,3) = 0.0;
 
-    // build projection matrix for camera 2 using the R and t we found before
-    // this represents how the second camera is positioned relative to the first one
+    // build projection matrix for camera 2 using the R and t we found before. This represents how the second camera is positioned relative to the first one
     Matrix34 Rt;
-    Rt(0,0) = R(0,0);
-    Rt(0,1) = R(0,1);
-    Rt(0,2) = R(0,2);
-    Rt(0,3) = t.x();
+    Rt(0,0) = R_used(0,0);
+    Rt(0,1) = R_used(0,1);
+    Rt(0,2) = R_used(0,2);
+    Rt(0,3) = t_used.x();
 
-    Rt(1,0) = R(1,0);
-    Rt(1,1) = R(1,1);
-    Rt(1,2) = R(1,2);
-    Rt(1,3) = t.y();
+    Rt(1,0) = R_used(1,0);
+    Rt(1,1) = R_used(1,1);
+    Rt(1,2) = R_used(1,2);
+    Rt(1,3) = t_used.y();
 
-    Rt(2,0) = R(2,0);
-    Rt(2,1) = R(2,1);
-    Rt(2,2) = R(2,2);
-    Rt(2,3) = t.z();
+    Rt(2,0) = R_used(2,0);
+    Rt(2,1) = R_used(2,1);
+    Rt(2,2) = R_used(2,2);
+    Rt(2,3) = t_used.z();
 
     // multiply with K to get the full projection matrix for camera 2
     Matrix34 P1 = K * Rt;
 
-    // we now loop over all corresponding image points and triangulate them one by one
-    // each pair of points should give us one 3D point
+    // we now loop over all corresponding image points and triangulate them one by one. Each pair of points should give us one 3D point
     for (int i = 0; i < (int)points_0.size(); i++) {
         double x0 = points_0[i].x();
         double y0 = points_0[i].y();
         double x1 = points_1[i].x();
         double y1 = points_1[i].y();
 
-        // here we build matrix A such that A * X = 0, where X is the 3D point
-        // this comes from combining the projection equations of both cameras
+        // here we build matrix A such that A * X = 0, where X is the 3D point. This comes from combining the projection equations of both cameras
         Matrix A(4, 4, 0.0);
 
         // compute each row separately so it is easier to see what is going on
@@ -455,8 +474,7 @@ bool Triangulation::triangulation(
         A.set_row(2, row3);
         A.set_row(3, row4);
 
-        // used SVD to solve for X
-        // the result is in the last column of V
+        // used SVD to solve for X. the result is in the last column of V
         Matrix Ux(4, 4, 0.0);
         Matrix Sx(4, 4, 0.0);
         Matrix Vx(4, 4, 0.0);
@@ -475,12 +493,24 @@ bool Triangulation::triangulation(
         double Yc = X[1] / X[3];
         double Zc = X[2] / X[3];
 
+        // make sure the point lies in front of the camera otherwise flip the sign to move it to the correct side
+        if (Zc < 0) {
+            Xc = -Xc;
+            Yc = -Yc;
+            Zc = -Zc;
+        }
+
         // store the 3D point so we can visualize it later
         Vector3D point_3d;
         point_3d = Vector3D(Xc, Yc, Zc);
         points_3d.push_back(point_3d);
     }
 
-    // we return true if we managed to reconstruct at least one point
+
+
+
+
+
+    // return true if at least one 3D point was reconstructed
     return !points_3d.empty();
 }

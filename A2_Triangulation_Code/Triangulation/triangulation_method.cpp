@@ -322,55 +322,54 @@ bool Triangulation::triangulation(
         }
     }
 
-    // keep a copy of the recovered pose for triangulation
-    Matrix33 R_used = best_R;
-    Vector3D t_used = best_t;
-
-    //
+    // Write the recovered pose to the output parameters.
     R = best_R;
     t = best_t;
 
     // STEP 3: triangulation.
-    // clear any previous 3D points so we start fresh for this reconstruction.
+    // Clear any previous 3D points so we start fresh for this reconstruction.
     points_3d.clear();
 
-    // build projection matrix for camera 1 (we assume this camera is at the origin)
+    // Build projection matrix for camera 1 (we assume this camera is at the origin).
     Matrix34 P0;
     P0(0,0) = fx;   P0(0,1) = s;    P0(0,2) = cx;   P0(0,3) = 0.0;
     P0(1,0) = 0.0;  P0(1,1) = fy;   P0(1,2) = cy;   P0(1,3) = 0.0;
     P0(2,0) = 0.0;  P0(2,1) = 0.0;  P0(2,2) = 1.0;  P0(2,3) = 0.0;
 
-    // build projection matrix for camera 2 using the R and t we found before. This represents how the second camera is positioned relative to the first one
+    // Build projection matrix for camera 2 using the R and t we found before.
+    // This represents how the second camera is positioned relative to the first one.
     Matrix34 Rt;
-    Rt(0,0) = R_used(0,0);
-    Rt(0,1) = R_used(0,1);
-    Rt(0,2) = R_used(0,2);
-    Rt(0,3) = t_used.x();
+    Rt(0,0) = best_R(0,0);
+    Rt(0,1) = best_R(0,1);
+    Rt(0,2) = best_R(0,2);
+    Rt(0,3) = best_t.x();
 
-    Rt(1,0) = R_used(1,0);
-    Rt(1,1) = R_used(1,1);
-    Rt(1,2) = R_used(1,2);
-    Rt(1,3) = t_used.y();
+    Rt(1,0) = best_R(1,0);
+    Rt(1,1) = best_R(1,1);
+    Rt(1,2) = best_R(1,2);
+    Rt(1,3) = best_t.y();
 
-    Rt(2,0) = R_used(2,0);
-    Rt(2,1) = R_used(2,1);
-    Rt(2,2) = R_used(2,2);
-    Rt(2,3) = t_used.z();
+    Rt(2,0) = best_R(2,0);
+    Rt(2,1) = best_R(2,1);
+    Rt(2,2) = best_R(2,2);
+    Rt(2,3) = best_t.z();
 
-    // multiply with K to get the full projection matrix for camera 2
+    // Multiply with K to get the full projection matrix for camera 2.
     Matrix34 P1 = K * Rt;
 
-    // we now loop over all corresponding image points and triangulate them one by one. Each pair of points should give us one 3D point
+    // We now loop over all corresponding image points and triangulate them one by one.
+    // Each pair of points should give us one 3D point.
     for (int i = 0; i < (int)points_0.size(); i++) {
         double x0 = points_0[i].x();
         double y0 = points_0[i].y();
         double x1 = points_1[i].x();
         double y1 = points_1[i].y();
 
-        // here we build matrix A such that A * X = 0, where X is the 3D point. This comes from combining the projection equations of both cameras
+        // Here we build matrix A such that A * X = 0, where X is the 3D point.
+        // This comes from combining the projection equations of both cameras.
         Matrix A(4, 4, 0.0);
 
-        // compute each row separately so it is easier to see what is going on
+        // Compute each row separately so it is easier to see what is going on.
         Vector row1 = x0 * P0.get_row(2) - P0.get_row(0);
         Vector row2 = y0 * P0.get_row(2) - P0.get_row(1);
         Vector row3 = x1 * P1.get_row(2) - P1.get_row(0);
@@ -381,41 +380,39 @@ bool Triangulation::triangulation(
         A.set_row(2, row3);
         A.set_row(3, row4);
 
-        // used SVD to solve for X. the result is in the last column of V
+        // Used SVD to solve for X. the result is in the last column of V.
         Matrix Ux(4, 4, 0.0);
         Matrix Sx(4, 4, 0.0);
         Matrix Vx(4, 4, 0.0);
         svd_decompose(A, Ux, Sx, Vx);
 
-        // take the last column of V as the solution in homogeneous coordinates
+        // Take the last column of V as the solution in homogeneous coordinates.
         Vector X = Vx.get_column(3);
 
-        // check if the homogeneous coordinate is valid before dividing
+        // Check if the homogeneous coordinate is valid before dividing.
         if (std::abs(X[3]) < 1e-10) {
             continue;
         }
 
-        // convert from homogeneous to normal 3D coordinates
+        // Convert from homogeneous to normal 3D coordinates.
         double Xc = X[0] / X[3];
         double Yc = X[1] / X[3];
         double Zc = X[2] / X[3];
 
-        // make sure the point lies in front of the camera otherwise flip the sign to move it to the correct side
+        // Make sure the point lies in front of the camera otherwise flip the sign to move it to the correct side.
         if (X[3] < 0) {
             Xc = -Xc; Yc = -Yc; Zc = -Zc;
         }
         // Then skip genuinely invalid points:
         if (Zc < 0) continue;
 
-        // store the 3D point so we can visualize it later
+        // Store the 3D point so we can visualize it later.
         Vector3D point_3d;
         point_3d = Vector3D(Xc, Yc, Zc);
         points_3d.push_back(point_3d);
     }
 
-
-
-// STEP 4: Evaluation using reprojection error (RMSE)
+// STEP 4: Evaluation using reprojection error (RMSE).
     double total_error = 0.0;
     int count_eval = 0;
 
@@ -430,7 +427,7 @@ bool Triangulation::triangulation(
         double u1_proj = proj1[0] / proj1[2];
         double v1_proj = proj1[1] / proj1[2];
 
-        // squared errors (not square rooted yet)
+        // Squared errors (not square rooted yet).
         double err0 = (u0_proj - points_0[i].x())*(u0_proj - points_0[i].x()) +
                       (v0_proj - points_0[i].y())*(v0_proj - points_0[i].y());
         double err1 = (u1_proj - points_1[i].x())*(u1_proj - points_1[i].x()) +
@@ -444,6 +441,6 @@ bool Triangulation::triangulation(
         double rms = std::sqrt(total_error / (2.0 * count_eval));
         std::cout << "RMS reprojection error: " << rms << " pixels" << std::endl << std::flush;
 
-    // return true if at least one 3D point was reconstructed
+    // Return true if at least one 3D point was reconstructed.
     return !points_3d.empty();
 }

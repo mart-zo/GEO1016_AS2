@@ -200,15 +200,15 @@ bool Triangulation::triangulation(
     Matrix33 K(fx, s, cx,
                0, fy, cy,
                0, 0, 1);
-    
+
     // Computing the essential matrix E.
     Matrix33 E = transpose(K) * F * K;
-    
+
     // Matrices W and Z, for later use in decomposition.
     Matrix33 W(0, -1, 0,
                1, 0, 0,
                0, 0, 1);
-    
+
     Matrix33 Z(0, 1, 0,
                -1, 0, 0,
                0, 0, 0);
@@ -412,6 +412,37 @@ bool Triangulation::triangulation(
         point_3d = Vector3D(Xc, Yc, Zc);
         points_3d.push_back(point_3d);
     }
+
+
+
+// STEP 4: Evaluation using reprojection error (RMSE)
+    double total_error = 0.0;
+    int count_eval = 0;
+
+    for (int i = 0; i < (int)points_3d.size(); i++) {
+        Vector4D X(points_3d[i].x(), points_3d[i].y(), points_3d[i].z(), 1.0);
+
+        Vector3D proj0 = P0 * X;
+        double u0_proj = proj0[0] / proj0[2];
+        double v0_proj = proj0[1] / proj0[2];
+
+        Vector3D proj1 = P1 * X;
+        double u1_proj = proj1[0] / proj1[2];
+        double v1_proj = proj1[1] / proj1[2];
+
+        // squared errors (not square rooted yet)
+        double err0 = (u0_proj - points_0[i].x())*(u0_proj - points_0[i].x()) +
+                      (v0_proj - points_0[i].y())*(v0_proj - points_0[i].y());
+        double err1 = (u1_proj - points_1[i].x())*(u1_proj - points_1[i].x()) +
+                      (v1_proj - points_1[i].y())*(v1_proj - points_1[i].y());
+
+        total_error += err0 + err1;
+        count_eval++;
+    }
+
+
+        double rms = std::sqrt(total_error / (2.0 * count_eval));
+        std::cout << "RMS reprojection error: " << rms << " pixels" << std::endl << std::flush;
 
     // return true if at least one 3D point was reconstructed
     return !points_3d.empty();
